@@ -1,0 +1,17 @@
+{
+	"input": "./sample/中央区.csv",
+	"output": "./sample/中央区_normalized.csv",
+	"api": {
+		"key": "<Google Geocode APIキー>",
+		"sleep": 200
+	},
+	"format": {
+		"prefecture": "東京都",
+		"city": "中央区",
+		"number": "{2}",
+		"address": "{3}",
+		"name": "{4}",
+		"lat": "{lat}",
+		"long": "{long}"
+	}
+}
