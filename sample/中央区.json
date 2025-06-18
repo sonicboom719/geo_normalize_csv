@@ -3,7 +3,12 @@
 	"output": "./sample/中央区_normalized.csv",
 	"api": {
 		"key": "<Google Geocode APIキー>",
-		"sleep": 200
+		"sleep": 200,
+		"gsi_check": {
+			"check": true,
+			"distance": 200,
+			"priority": "gsi"
+		}
 	},
 	"format": {
 		"prefecture": "東京都",

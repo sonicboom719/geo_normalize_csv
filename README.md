@@ -1,7 +1,7 @@
 
 # geo_normalize_csv
 
-自治体が提供するポスター掲示場情報のCSVを正規化し、Google Maps API を使って緯度経度を付与するバッチ処理ツールです。  
+自治体が提供するポスター掲示場情報のCSVを正規化し、Google Maps APIや国土地理院APIを使って緯度経度を付与するバッチ処理ツールです。  
 CSV形式で複数行の住所データを一括変換し、別の「正規化済みCSV」として出力します。
 
 ---
@@ -9,7 +9,8 @@ CSV形式で複数行の住所データを一括変換し、別の「正規化�
 ## 🚀 機能概要
 
 - 指定フォーマットに従って **CSVを整形出力**
-- Google Maps Geocoding API を使って **緯度・経度を取得**
+- Google Maps Geocoding API および **国土地理院API** を使って **緯度・経度を取得**
+- **2重チェック機能**：両APIの緯度・経度を比較し、ズレが大きい場合は指定した優先APIの値を採用可能
 - JSON形式の設定ファイルで柔軟に制御可能
 - 住所に含まれる **漢数字（例：二丁目）をアラビア数字（2丁目）に変換(デフォルトでは変換無し)**
 
@@ -42,7 +43,12 @@ geo_normalize_csv/
   "output": "./sample/中央区_normalized.csv",
   "api": {
     "key": "YOUR_GOOGLE_API_KEY",
-    "sleep": 200
+    "sleep": 200,
+    "gsi_check": {
+      "check": true,
+      "distance": 200,
+      "priority": "gsi"
+    }
   },
   "format": {
     "prefecture": "東京都",
@@ -56,7 +62,47 @@ geo_normalize_csv/
 }
 ```
 - `{n}`: 入力CSVの n 列目（1始まり）を参照  
-- `{lat}`, `{long}`: Google Maps API から取得される緯度・経度
+- `{lat}`, `{long}`: APIから取得される緯度・経度
+
+---
+
+### 🏛️ **国土地理院APIによる2重チェック機能（gsi_check）について**
+
+#### `api.gsi_check` 設定例
+
+```json
+"gsi_check": {
+  "check": true,
+  "distance": 200,
+  "priority": "gsi"
+}
+```
+
+| パラメータ名 | 型      | 説明 |
+|--------------|---------|--------------------------------------------------------------------|
+| check        | boolean | `true`なら2重チェックを有効にします。Googleと国土地理院APIで距離差を比較 |
+| distance     | int     | 距離閾値（メートル）。この値以上のズレがあればpriority設定に従い優先APIを決定 |
+| priority     | string  | `"gsi"`なら国土地理院API、`"google"`ならGoogleの値をズレ時に採用<br>省略時は"gsi" |
+
+- **check**  
+  `true` なら、Google APIと国土地理院APIの両方から座標を取得し「ズレ（距離差）」を比較します。
+- **distance**  
+  両APIの座標の距離差（メートル）を指定。この値以上のズレがあれば、下記priority設定に従い、どちらかのAPIの値を「採用値」としてCSV出力します。
+- **priority**  
+  `"gsi"`の場合…ズレがdistance以上なら**国土地理院API**の座標を優先  
+  `"google"`の場合…ズレがdistance以上なら**Google Maps API**の座標を優先  
+  他の値の場合はエラーで終了します。  
+  **省略時・無指定時は"gsi"（国土地理院API優先）がデフォルトとなります。**
+
+> **おすすめ**：  
+> 国土地理院APIの精度が高いため、`priority: "gsi"`（デフォルト）のままがおすすめです。
+
+---
+
+### 📝 **設定の解説**
+- `gsi_check`自体や各項目が未指定の場合は「200m以上ズレは国土地理院API採用」のデフォルトとなります
+- `priority`は `"gsi"`または`"google"`のみ指定可能
+- **ズレがdistance未満の場合はGoogleの座標を採用します**
 
 ---
 
@@ -81,6 +127,7 @@ python geo_normalize_csv.py sample/中央区.json
 - Google Maps Geocoding API を利用するために **APIキーが必要** です  
 - APIキーは課金対象になるため、使用量制限などを設定してください  
 - `normalize_address_digits` を `true` に設定すると、**漢数字がアラビア数字に変換されます**
+- 国土地理院APIで座標が取得できない場合や設定エラー時は適宜警告メッセージが出ます
 
 ---
 
@@ -88,6 +135,7 @@ python geo_normalize_csv.py sample/中央区.json
 
 - `{2}-{3}` などのように複数列を組み合わせて1項目を作ることが可能です
 - トークン `{lat}`, `{long}` は初回のみ API に問い合わせ、キャッシュされます
+- 両APIの差分チェックや出力値カスタマイズも可能です
 
 ---
 
@@ -143,11 +191,6 @@ python cat_normalize_csv.py ./sample/さいたま市_normalized
 
 - 各区単位で正規化処理を進めたあと、「市」全体のデータが欲しい場合
 - 各区の担当者が別々に正規化CSVを作っても、あとから1つにまとめたい場合
-
----
-
-**本ツールのスクリプトも本リポジトリに同梱されています。  
-困った場合は [issues](https://github.com/sonicboom719/geo_normalize_csv/issues) でご質問ください。**
 
 ---
 
