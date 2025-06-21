@@ -2,8 +2,10 @@
 	"input": "./sample/中央区.csv",
 	"output": "./sample/中央区_normalized.csv",
 	"api": {
-		"key": "<Google Geocode APIキー>",
+		"key": "YOUR_GOOGLE_API_KEY",
 		"sleep": 200,
+		"mode": "reverse_geocode",
+		"reverse_geocode_check": true,
 		"gsi_check": {
 			"check": true,
 			"distance": 200,
@@ -17,6 +19,7 @@
 		"address": "{3}",
 		"name": "{4}",
 		"lat": "{lat}",
-		"long": "{long}"
+		"long": "{long}",
+    	"note": ""
 	}
 }

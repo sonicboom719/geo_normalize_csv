@@ -6,7 +6,6 @@ import requests
 import unicodedata
 import re
 from math import radians, cos, sin, sqrt, atan2
-from difflib import SequenceMatcher
 
 KANJI_NUMERAL_MAP = {
     "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4,
@@ -101,13 +100,8 @@ def reverse_geocode_google(lat, lng, api_key):
         return None
 
 def normalize_japanese_address(addr):
-    import unicodedata
-    import re
-
     if not addr:
         return ""
-
-    # 全角→半角・記号統一
     addr = unicodedata.normalize("NFKC", addr)
     addr = re.sub(r'日本|JAPAN', '', addr, flags=re.IGNORECASE)
     addr = re.sub(r'〒\d{3}-?\d{4}', '', addr)
@@ -118,7 +112,7 @@ def normalize_japanese_address(addr):
     addr = normalize_address_digits(addr)
     addr = re.sub(r'(先|付近|階|Ｆ|号室|室|[A-Za-zａ-ｚＡ-Ｚ]{1,10})$', '', addr)
 
-    # 1. 丁目+番パターン（例: 銀座1丁目19番）
+    # 丁目+番パターン
     m = re.search(r'^(.+?)(\d+)丁目(\d+)番', addr)
     if m:
         town = m.group(1)
@@ -126,7 +120,7 @@ def normalize_japanese_address(addr):
         ban = m.group(3)
         return f'{town}{chome}丁目{ban}番'
 
-    # 2. 丁目+ハイフン+番地（例: 銀座1丁目19-8、銀座1丁目19-）
+    # 丁目+ハイフン+番地
     m = re.search(r'^(.+?)(\d+)丁目(\d+)-', addr)
     if m:
         town = m.group(1)
@@ -134,59 +128,63 @@ def normalize_japanese_address(addr):
         ban = m.group(3)
         return f'{town}{chome}丁目{ban}番'
 
-    # 3. 町名+ハイフン+数字（丁目なし、例: 京橋1-19-8 など）
+    # 町名+ハイフン+数字（丁目なし）
     m = re.search(r'^(.+?)(\d+)-', addr)
     if m:
         town = m.group(1)
         ban = m.group(2)
         return f'{town}{ban}番'
 
-    # 4. 丁目だけ
+    # 丁目だけ
     m = re.search(r'^(.+?)(\d+)丁目', addr)
     if m:
         town = m.group(1)
         chome = m.group(2)
         return f'{town}{chome}丁目'
 
-    # 5. 番だけ
+    # 番だけ
     m = re.search(r'^(.+?)(\d+)番', addr)
     if m:
         town = m.group(1)
         ban = m.group(2)
         return f'{town}{ban}番'
 
-    # 6. 町名のみ
     m = re.match(r'^([^\d]+)', addr)
     if m:
         return m.group(1)
-
     return addr
 
 def addresses_roughly_match(addr1, addr2, threshold=None):
+    import re
     core1 = normalize_japanese_address(addr1)
     core2 = normalize_japanese_address(addr2)
-    # Plus code（MQ4Pや7FG7などの大文字英数字＋記号）で始まる場合は強制不一致
-    if re.match(r'^[A-Z0-9]{4,}\+', core2):
-        print(f"core2={core2}（Google逆引きがPlus Codeなので自動不一致）")
-        return False
     print(f"core1={core1} core2={core2}")
     return core1 == core2
 
 def get_best_latlng(address, api_key, gsi_check=True, distance_threshold=200, priority="gsi",
-                    mode="distance", reverse_geocode_check=False):
+                    mode="distance", reverse_geocode_check=False, note_out=None):
     lat1, lon1 = get_gmap_latlng(address, api_key)
     lat2, lon2 = get_gsi_latlng(address)
 
-    # どちらも取得できなければnone
     if lat1 is None and lat2 is None:
         print(f"警告: '{address}' の座標取得に失敗しました。")
+        if note_out is not None:
+            note_out.append("緯度経度は怪しい")
         return None, None, "none"
 
     # 逆ジオコーディングモード
     if mode == "reverse_geocode" and reverse_geocode_check and lat1 is not None:
         rev_addr = reverse_geocode_google(lat1, lon1, api_key)
-        if not addresses_roughly_match(address, rev_addr):
-            print(f"警告: '{address}' Google座標の逆引きが不一致'{rev_addr}' → 国土地理院APIを採用します。")
+        suspicious = False
+        if rev_addr is not None:
+            if not addresses_roughly_match(address, rev_addr):
+                print(f"警告: '{address}' Google座標の逆引きが不一致'{rev_addr}' → 国土地理院APIを採用します。")
+                suspicious = True
+        else:
+            suspicious = True  # 逆ジオコーディング失敗も怪しいとみなす
+        if suspicious:
+            if note_out is not None:
+                note_out.append("緯度経度は怪しい")
             if lat2 is not None:
                 return lat2, lon2, "gsi"
             else:
@@ -196,7 +194,6 @@ def get_best_latlng(address, api_key, gsi_check=True, distance_threshold=200, pr
 
     # 距離チェックモード（従来方式）
     if mode == "distance":
-        # どちらか取得できればそれを返す
         if lat1 is not None and lat2 is None:
             return lat1, lon1, "google"
         if lat2 is not None and lat1 is None:
@@ -204,6 +201,8 @@ def get_best_latlng(address, api_key, gsi_check=True, distance_threshold=200, pr
         dist = haversine(lat1, lon1, lat2, lon2)
         if gsi_check and dist >= distance_threshold:
             print(f"警告: '{address}' のGoogle座標と国土地理院座標が {int(dist)}m ズレ。", end="")
+            if note_out is not None:
+                note_out.append("緯度経度は怪しい")
             if priority == "gsi":
                 print("国土地理院APIの座標を採用します。")
                 return lat2, lon2, "gsi"
@@ -213,14 +212,14 @@ def get_best_latlng(address, api_key, gsi_check=True, distance_threshold=200, pr
             else:
                 print(f"\nエラー: api.gsi_check.priorityの値 '{priority}' はサポートされていません。'gsi'または'google'のみ指定可能です。")
                 sys.exit(1)
-        # ズレが閾値未満ならGoogleを優先（仕様通り）
         return lat1, lon1, "google"
 
-    # fallback
     if lat1 is not None:
         return lat1, lon1, "google"
     if lat2 is not None:
         return lat2, lon2, "gsi"
+    if note_out is not None:
+        note_out.append("緯度経度は怪しい")
     return None, None, "none"
 
 def render_template(template_str, row, cache, full_api_address, api_key, sleep_msec,
@@ -232,13 +231,10 @@ def render_template(template_str, row, cache, full_api_address, api_key, sleep_m
             return clean(row[idx]) if idx < len(row) else ""
         elif token in ("lat", "long"):
             if "latlng" not in cache:
-                lat, lng, source = get_best_latlng(
-                    full_api_address, api_key, gsi_check, gsi_dist, priority, mode, reverse_geocode_check
-                )
-                cache["latlng"] = (lat, lng)
-                cache["source"] = source
-                time.sleep(sleep_msec / 1000)
-            lat, lng = cache["latlng"]
+                # lat, lng をキャッシュ
+                # note_outはここでは使わない（get_best_latlngはprocessで実行）
+                pass
+            lat, lng = cache.get("latlng", (None, None))
             return str(clean(lat if token == "lat" else lng))
         else:
             return ""
@@ -249,18 +245,18 @@ def process(config_path):
     input_rows = read_csv(config["input"])
     format_config = config["format"]
     header = list(format_config.keys())
+    if "note" not in header:
+        header.append("note")
     output_path = config["output"]
 
     api_needed = any("{lat}" in v or "{long}" in v for v in format_config.values())
     api_key = config.get("api", {}).get("key") if api_needed else None
     sleep_msec = int(config.get("api", {}).get("sleep", 200)) if api_needed else 200
 
-    # API判定モード追加
     api_opts = config.get("api", {})
     mode = api_opts.get("mode", "distance")
     reverse_geocode_check = bool(api_opts.get("reverse_geocode_check", False))
 
-    # gsi_checkオプション読み込み（距離チェック時のみ有効）
     gsi_opts = api_opts.get("gsi_check", None)
     if gsi_opts is None:
         gsi_check = True
@@ -283,7 +279,9 @@ def process(config_path):
     for idx, row in enumerate(input_rows, start=1):
         out_row = []
         cache = {}
+        note_list = []
 
+        # address列の作成部分
         address_token = format_config.get("address", "")
         if "{" in address_token and "}" in address_token:
             match = re.search(r"\{(\d+)\}", address_token)
@@ -300,15 +298,26 @@ def process(config_path):
         full_api_address = f"{format_config['prefecture']}{format_config['city']}{normalized_address}"
         print(f"{idx}行目を処理中です: {full_api_address}")
 
-        for col_name, template in format_config.items():
-            if col_name == "address":
+        # 緯度経度（note_listを渡してget_best_latlng内でnote列をセット）
+        lat, lng, source = get_best_latlng(
+            full_api_address, api_key, gsi_check, gsi_dist, priority, mode, reverse_geocode_check, note_list
+        )
+        cache["latlng"] = (lat, lng)
+        cache["source"] = source
+
+        for col_name in header:
+            if col_name == "note":
+                out_row.append("".join(note_list))
+            elif col_name == "address":
                 out_row.append(clean(normalized_address))
-            else:
+            elif col_name in format_config:
                 rendered = render_template(
-                    template, row, cache, full_api_address, api_key, sleep_msec,
+                    format_config[col_name], row, cache, full_api_address, api_key, sleep_msec,
                     gsi_check, gsi_dist, priority, mode, reverse_geocode_check
                 )
                 out_row.append(rendered)
+            else:
+                out_row.append("")
 
         with open(output_path, 'a', encoding='utf-8', newline='') as f:
             csv.writer(f).writerow(out_row)
