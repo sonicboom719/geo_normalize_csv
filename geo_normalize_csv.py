@@ -165,7 +165,11 @@ def normalize_japanese_address(addr):
 def addresses_roughly_match(addr1, addr2, threshold=None):
     core1 = normalize_japanese_address(addr1)
     core2 = normalize_japanese_address(addr2)
-    print(f"core1={core1} core2={core2}")  # ダンプ
+    # Plus code（MQ4Pや7FG7などの大文字英数字＋記号）で始まる場合は強制不一致
+    if re.match(r'^[A-Z0-9]{4,}\+', core2):
+        print(f"core2={core2}（Google逆引きがPlus Codeなので自動不一致）")
+        return False
+    print(f"core1={core1} core2={core2}")
     return core1 == core2
 
 def get_best_latlng(address, api_key, gsi_check=True, distance_threshold=200, priority="gsi",
