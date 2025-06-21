@@ -3,6 +3,7 @@
 
 自治体が提供するポスター掲示場情報のCSVを正規化し、Google Maps APIや国土地理院APIを使って緯度経度を付与するバッチ処理ツールです。  
 CSV形式で複数行の住所データを一括変換し、別の「正規化済みCSV」として出力します。
+APIで取得した緯度経度が怪しい場合は、出力CSVのnote列に「緯度経度は怪しい」と追記します。
 
 ---
 
@@ -11,6 +12,10 @@ CSV形式で複数行の住所データを一括変換し、別の「正規化�
 - 指定フォーマットに従って **CSVを整形出力**
 - Google Maps Geocoding API および **国土地理院API** を使って **緯度・経度を取得**
 - **2重チェック機能**：両APIの緯度・経度を比較し、ズレが大きい場合は指定した優先APIの値を採用可能
+- **逆引きチェック機能**：逆ジオコーディングAPIを使って緯度経度が怪しい場合は国土地理院APIを採用します。
+- 上記チェック機能のどちらか1つを選べます。
+- チェック機能で引っかかった場合は、出力CSVのnote列に「緯度経度は怪しい」を追記
+- デフォルトでは「2重チェック機能」が動作します。「逆ジオコーディングチェック機能」を使う場合はJSON設定します。
 - JSON形式の設定ファイルで柔軟に制御可能
 - 住所に含まれる **漢数字（例：二丁目）をアラビア数字（2丁目）に変換(デフォルトでは変換無し)**
 
@@ -41,14 +46,17 @@ geo_normalize_csv/
 {
   "input": "./sample/中央区.csv",
   "output": "./sample/中央区_normalized.csv",
-  "api": {
+    "api": {
     "key": "YOUR_GOOGLE_API_KEY",
     "sleep": 200,
     "gsi_check": {
       "check": true,
       "distance": 200,
       "priority": "gsi"
-    }
+    },
+    "reverse_geocode_check": true,   // 逆ジオコーディングチェック有効化
+    "mode": "reverse_geocode"        // 逆引きチェックする場合はreverse_geocodeに、2つのAPIの距離差でチェックする場合はdistanceに指定
+  },
   },
   "format": {
     "prefecture": "東京都",
@@ -58,6 +66,7 @@ geo_normalize_csv/
     "name": "{5}",
     "lat": "{lat}",
     "long": "{long}"
+    "note": ""
   }
 }
 ```
