@@ -6,6 +6,9 @@ import requests
 import unicodedata
 import re
 from math import radians, cos, sin, sqrt, atan2
+import percache, os
+CACHE_FILE = '/tmp/geo_normalize_csv_cache'
+geoCache = percache.Cache(os.path.expanduser(CACHE_FILE))
 
 KANJI_NUMERAL_MAP = {
     "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4,
@@ -29,11 +32,22 @@ def kanji_to_number(kanji):
 def normalize_address_digits(addr):
     addr = unicodedata.normalize("NFKC", addr)
     addr = re.sub(r"[‐－―ー−]", "-", addr)
+    
+    # 漢数字の処理
     def replacer(match):
         kanji = match.group(1)
         unit = match.group(2)
         return f"{kanji_to_number(kanji)}{unit}"
-    return re.sub(r"([〇一二三四五六七八九十]+)(丁目|番|号)", replacer, addr).strip().strip("　")
+    addr = re.sub(r"([〇一二三四五六七八九十]+)(丁目|番|号)", replacer, addr)
+    
+    # アラビア数字のハイフンパターン処理（1-29 → 1丁目29番）
+    def arabic_replacer(match):
+        num1 = match.group(1)
+        num2 = match.group(2)
+        return f"{num1}丁目{num2}番"
+    addr = re.sub(r"(\d+)-(\d+)", arabic_replacer, addr)
+    
+    return addr.strip().strip("　")
 
 def clean(val):
     return val.strip().strip("　") if isinstance(val, str) else val
@@ -55,6 +69,7 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
+@geoCache  # Google Maps API呼び出しをキャッシュ 💾
 def get_gmap_latlng(address, api_key):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": api_key, "language": "ja"}
@@ -73,6 +88,7 @@ def get_gmap_latlng(address, api_key):
     except Exception as e:
         return None, None
 
+@geoCache  # 国土地理院API呼び出しをキャッシュ 💾
 def get_gsi_latlng(address):
     url = "https://msearch.gsi.go.jp/address-search/AddressSearch"
     params = {"q": address}
@@ -86,6 +102,7 @@ def get_gsi_latlng(address):
     except Exception:
         return None, None
 
+@geoCache  # Google逆ジオコーディングAPI呼び出しをキャッシュ 💾
 def reverse_geocode_google(lat, lng, api_key):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"latlng": f"{lat},{lng}", "key": api_key, "language": "ja"}
@@ -112,52 +129,51 @@ def normalize_japanese_address(addr):
     addr = normalize_address_digits(addr)
     addr = re.sub(r'(先|付近|階|Ｆ|号室|室|[A-Za-zａ-ｚＡ-Ｚ]{1,10})$', '', addr)
 
-    # 丁目+番パターン
-    m = re.search(r'^(.+?)(\d+)丁目(\d+)番', addr)
-    if m:
-        town = m.group(1)
-        chome = m.group(2)
-        ban = m.group(3)
-        return f'{town}{chome}丁目{ban}番'
-
-    # 丁目+ハイフン+番地
-    m = re.search(r'^(.+?)(\d+)丁目(\d+)-', addr)
-    if m:
-        town = m.group(1)
-        chome = m.group(2)
-        ban = m.group(3)
-        return f'{town}{chome}丁目{ban}番'
-
-    # 町名+ハイフン+数字（丁目なし）
-    m = re.search(r'^(.+?)(\d+)-', addr)
-    if m:
-        town = m.group(1)
-        ban = m.group(2)
-        return f'{town}{ban}番'
-
-    # 丁目だけ
-    m = re.search(r'^(.+?)(\d+)丁目', addr)
-    if m:
-        town = m.group(1)
-        chome = m.group(2)
-        return f'{town}{chome}丁目'
-
-    # 番だけ
-    m = re.search(r'^(.+?)(\d+)番', addr)
-    if m:
-        town = m.group(1)
-        ban = m.group(2)
-        return f'{town}{ban}番'
-
-    m = re.match(r'^([^\d]+)', addr)
-    if m:
-        return m.group(1)
+    # 丁目を-に変換
+    addr = re.sub(r'丁目', '-', addr)
+    
+    # 番を-に変換
+    addr = re.sub(r'番', '-', addr)
+    
+    # 号を-に変換
+    addr = re.sub(r'号', '-', addr)
+    
+    # 余分なハイフンを削除（連続するハイフンを1つに）
+    addr = re.sub(r'-+', '-', addr)
+    
+    # 最後の余分なハイフンを削除
+    addr = re.sub(r'-+$', '', addr)
+    
+    # 全角数字を半角数字に変換
+    addr = addr.translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+    
     return addr
 
 def addresses_roughly_match(addr1, addr2, threshold=None):
     import re
+    print(f"addr1={addr1} addr2={addr2}")
     core1 = normalize_japanese_address(addr1)
     core2 = normalize_japanese_address(addr2)
+    
+    # core2から最後の施設名部分を削除（-で区切られた最後の部分が施設名の場合）
+    if '-' in core2:
+        parts = core2.split('-')
+        # 最後の部分が数字でない場合は施設名として削除
+        if parts and not parts[-1].isdigit():
+            core2 = '-'.join(parts[:-1])
+    
+    # core1のハイフン数に合わせてcore2を調整
+    core1_hyphen_count = core1.count('-')
+    core2_hyphen_count = core2.count('-')
+    
+    if core2_hyphen_count > core1_hyphen_count:
+        # core2のハイフンが多い場合、core1のハイフン数に合わせて切り詰める
+        parts = core2.split('-')
+        # core1のハイフン数+1の部分までを保持（例：core1が2個のハイフンなら3個の部分まで）
+        adjusted_parts = parts[:core1_hyphen_count + 1]
+        core2 = '-'.join(adjusted_parts)
+        print(f"core2を調整: ハイフン数 {core2_hyphen_count} → {core1_hyphen_count}")
+    
     print(f"core1={core1} core2={core2}")
     return core1 == core2
 
@@ -289,6 +305,9 @@ def process(config_path):
             raw_address = row[address_index] if 0 <= address_index < len(row) else ""
         else:
             raw_address = ""
+
+        # 不要な空白' 'を削除（後処理への影響を防ぐ） 🗑️
+        raw_address = raw_address.replace(' ', '')
 
         if config.get("normalize_address_digits", False):
             normalized_address = normalize_address_digits(raw_address)
