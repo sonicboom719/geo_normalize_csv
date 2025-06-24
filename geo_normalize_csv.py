@@ -6,6 +6,9 @@ import requests
 import unicodedata
 import re
 from math import radians, cos, sin, sqrt, atan2
+import percache, os
+CACHE_FILE = '/tmp/geo_normalize_csv_cache'
+geoCache = percache.Cache(os.path.expanduser(CACHE_FILE))
 
 KANJI_NUMERAL_MAP = {
     "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4,
@@ -66,6 +69,7 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dphi/2)**2 + cos(phi1)*cos(phi2)*sin(dlambda/2)**2
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
+@geoCache  # Google Maps API呼び出しをキャッシュ 💾
 def get_gmap_latlng(address, api_key):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": api_key, "language": "ja"}
@@ -84,6 +88,7 @@ def get_gmap_latlng(address, api_key):
     except Exception as e:
         return None, None
 
+@geoCache  # 国土地理院API呼び出しをキャッシュ 💾
 def get_gsi_latlng(address):
     url = "https://msearch.gsi.go.jp/address-search/AddressSearch"
     params = {"q": address}
@@ -97,6 +102,7 @@ def get_gsi_latlng(address):
     except Exception:
         return None, None
 
+@geoCache  # Google逆ジオコーディングAPI呼び出しをキャッシュ 💾
 def reverse_geocode_google(lat, lng, api_key):
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"latlng": f"{lat},{lng}", "key": api_key, "language": "ja"}
@@ -299,6 +305,9 @@ def process(config_path):
             raw_address = row[address_index] if 0 <= address_index < len(row) else ""
         else:
             raw_address = ""
+
+        # 不要な空白' 'を削除（後処理への影響を防ぐ） 🗑️
+        raw_address = raw_address.replace(' ', '')
 
         if config.get("normalize_address_digits", False):
             normalized_address = normalize_address_digits(raw_address)
