@@ -314,7 +314,24 @@ def process(config_path):
         else:
             normalized_address = raw_address.strip().strip("　")
 
-        full_api_address = f"{format_config['prefecture']}{format_config['city']}{normalized_address}"
+        # normalized_addressに既に都道府県名や市町村名が含まれているかチェック 🔍
+        prefecture = format_config['prefecture']
+        city = format_config['city']
+        
+        # 都道府県名と市町村名の両方が行頭から含まれている場合
+        if normalized_address.startswith(prefecture + city):
+            # 行頭の都道府県名と市町村名を取り除く
+            normalized_address = normalized_address[len(prefecture + city):]
+        # 市町村名が行頭から含まれている場合
+        elif normalized_address.startswith(city):
+            # 行頭の市町村名を取り除く
+            normalized_address = normalized_address[len(city):]
+        # 都道府県名が行頭から含まれている場合
+        elif normalized_address.startswith(prefecture):
+            # 行頭の都道府県名を取り除く
+            normalized_address = normalized_address[len(prefecture):]
+        full_api_address = f"{prefecture}{city}{normalized_address}"
+
         print(f"{idx}行目を処理中です: {full_api_address}")
 
         # 緯度経度（note_listを渡してget_best_latlng内でnote列をセット）
