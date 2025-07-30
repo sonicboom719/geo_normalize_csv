@@ -4,7 +4,8 @@ import os
 import glob
 import csv
 
-EXPECTED_HEADER = ["prefecture", "city", "number", "address", "name", "lat", "long"]
+EXPECTED_HEADER_BASE = ["prefecture", "city", "number", "address", "name", "lat", "long"]
+EXPECTED_HEADER_OPTION = EXPECTED_HEADER_BASE + ["note"]
 
 def error_exit(msg):
     print(f"エラー: {msg}", file=sys.stderr)
@@ -39,6 +40,8 @@ def main():
 
     data_rows = []
     file_row_counts = []
+    has_note = False
+    file_headers = []
 
     for idx, (wc, file_path) in enumerate(candidate_files):
         with open(file_path, "r", encoding="utf-8") as f:
@@ -47,15 +50,32 @@ def main():
                 header = next(reader)
             except StopIteration:
                 error_exit(f"{file_path} が空ファイルです。")
-            if header != EXPECTED_HEADER:
+            file_headers.append(header)
+            if set(header) == set(EXPECTED_HEADER_BASE):
+                note_idx = None
+            elif set(header) == set(EXPECTED_HEADER_OPTION):
+                note_idx = header.index("note")
+                has_note = True
+            else:
                 error_exit(
                     f"ヘッダが一致しません: '{file_path}'\n"
-                    f"期待値: {','.join(EXPECTED_HEADER)}\n"
+                    f"期待値: {','.join(EXPECTED_HEADER_BASE)} または {','.join(EXPECTED_HEADER_OPTION)}\n"
                     f"実際値: {','.join(header)}"
                 )
-            rows = list(reader)
-            data_rows.extend(rows)
-            file_row_counts.append((file_path, len(rows)))
+            # 各行をnote列有無に応じて揃える
+            for row in reader:
+                if has_note:
+                    # 出力にnote列が必要
+                    if set(header) == set(EXPECTED_HEADER_OPTION):
+                        # note列あり
+                        data_rows.append(row if len(row) == 8 else row + [""])
+                    else:
+                        # note列なし
+                        data_rows.append(row + [""])
+                else:
+                    # note列不要
+                    data_rows.append(row)
+            file_row_counts.append((file_path, len(data_rows) - sum(c for _, c in file_row_counts)))
 
     # ⑨: ファイル名＆データ行数出力（日本語）
     for file_path, row_count in file_row_counts:
@@ -64,7 +84,10 @@ def main():
     output_file = os.path.join(dirname, prefix_base + ".csv")
     with open(output_file, "w", encoding="utf-8", newline="") as fout:
         writer = csv.writer(fout)
-        writer.writerow(EXPECTED_HEADER)
+        if has_note:
+            writer.writerow(EXPECTED_HEADER_OPTION)
+        else:
+            writer.writerow(EXPECTED_HEADER_BASE)
         writer.writerows(data_rows)
 
     print(f"{len(candidate_files)} 個のファイルを {output_file} に連結しました。")
