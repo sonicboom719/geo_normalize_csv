@@ -123,7 +123,17 @@ geo_normalize_csv/
 pip install requests
 ```
 
-### 2. スクリプトを実行
+### 2. 住所正規化データベースを作成
+```bash
+curl https://www.post.japanpost.jp/zipcode/dl/utf/zip/utf_ken_all.zip -o ./utf_ken_all.zip
+unzip utf_ken_all.zip
+rm ./utf_ken_all.zip  # zipファイルを削除
+python convert_address_db.py utf_ken_all.csv -o /tmp/address_validation_db.csv
+rm ./utf_ken_all.csv  # csvファイルを削除
+
+```
+
+### 3. スクリプトを実行
 
 ```bash
 python geo_normalize_csv.py sample/中央区.json
